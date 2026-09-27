@@ -1,0 +1,14 @@
+borochid-driver-logitech-hidpp
+Copyright 2026 Rodolfo Justiniano
+
+HID++ 2.0 protocol facts (feature IDs, function numbers, DPI list encoding,
+onboard profile commands) were learned from the public documentation and
+behaviour of:
+
+* Solaar (GPL-2.0), https://github.com/pwr-Solaar/Solaar
+* libratbag (MIT), https://github.com/libratbag/libratbag
+* the Linux kernel's hid-logitech-hidpp driver (GPL-2.0)
+
+Only protocol facts were used; no code was copied. Device behaviour
+(button numbers, host mode across power cycles, sleep) was measured on a
+G502 X LIGHTSPEED with this repo's probe.
