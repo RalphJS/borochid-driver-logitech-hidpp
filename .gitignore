@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+# Debian build artefacts
+debian/.debhelper/
+debian/files
+debian/*.substvars
+debian/*.debhelper.log
+debian/borochid-driver-logitech-hidpp/
+debian/borochid-driver-logitech-hidpp.udev
+# RPM build output
+*.rpm
+*.tar.gz
