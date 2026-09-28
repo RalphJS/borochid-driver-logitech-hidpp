@@ -9,8 +9,8 @@ DEFAULT = Profile("default", "Default")
 SUPER_V = {"keys": ["KEY_LEFTMETA", "KEY_V"]}
 
 
-async def online(settings=None):
-    driver, mouse, events, store = make_driver(settings)
+async def online(settings=None, wired=False):
+    driver, mouse, events, store = make_driver(settings, wired)
     await driver.start()
     await settle(driver)
     assert driver.state["link"] == "online"
@@ -160,6 +160,22 @@ def test_power_cycle_takes_over_again(run):
     assert mouse.mode == 2 and mouse.spy and mouse.table[3] == 2 and mouse.dpi == 1600
 
 
+def test_the_receiver_connection_waits_while_the_mouse_is_on_its_cable(run):
+    async def main():
+        driver, mouse, _, _ = make_driver()
+        mouse.on_cable = True
+        await driver.start()
+        await settle(driver)
+        waiting = driver.state["link"]
+        mouse.on_cable = False
+        mouse.power_cycle()  # unplugged: back on the receiver, which announces it
+        await settle(driver)
+        return waiting, driver.state["link"], mouse
+
+    waiting, link, mouse = run(main())
+    assert waiting == "asleep" and link == "online" and mouse.mode == 2
+
+
 def test_revert_without_notification_is_caught_when_the_mouse_is_used_again(run):
     async def main():
         driver, mouse, _, _ = await online()
@@ -306,3 +322,28 @@ def test_deleted_profiles_are_dropped_and_settings_survive_a_restart(run):
 def test_the_mouse_identifies_itself_by_unit_id(run):
     driver, *_ = run(online())
     assert driver.device_id == "01AB0945"
+
+
+def test_battery_is_left_to_the_kernel_behind_the_receiver(run):
+    async def main():
+        driver, mouse, _, _ = await online()
+        mouse.battery_event(60, 0)
+        await settle(driver, 1)
+        return driver, mouse
+
+    driver, mouse = run(main())
+    assert not mouse.called(0x1004, 1) and "battery" not in driver.state
+
+
+def test_battery_is_read_on_the_cable(run):
+    async def main():
+        driver, mouse, _, _ = await online(wired=True)
+        first = (driver.state["battery"], driver.state["charging"])
+        mouse.battery_event(62, 3)  # full
+        await settle(driver, 1)
+        full = (driver.state["battery"], driver.state["charging"])
+        mouse.battery_event(62, 0)
+        await settle(driver, 1)
+        return first, full, (driver.state["battery"], driver.state["charging"])
+
+    assert run(main()) == ((61, True), (62, True), (62, False))

@@ -78,6 +78,14 @@ class ErrorCode(IntEnum):
     UNSUPPORTED = 9
 
 
+# HID++ 1.0 error codes: from a receiver, about the device behind it.
+RECEIVER_ERRORS = {
+    1: "INVALID_SUBID", 2: "INVALID_ADDRESS", 3: "INVALID_VALUE", 4: "CONNECT_FAIL",
+    5: "TOO_MANY_DEVICES", 6: "ALREADY_EXISTS", 7: "BUSY", 8: "UNKNOWN_DEVICE",
+    9: "RESOURCE_ERROR", 10: "REQUEST_UNAVAILABLE", 11: "INVALID_PARAM_VALUE", 12: "WRONG_PIN_CODE",
+}
+
+
 def feature_name(feature_id: int) -> str:
     try:
         return Feature(feature_id).name
@@ -112,9 +120,14 @@ class Error:
     function: int
     sw_id: int
     code: int
+    # A HID++ 1.0 error: the receiver's, e.g. UNKNOWN_DEVICE when the device
+    # isn't connected to it (switched off, or on its cable).
+    from_receiver: bool = False
 
     @property
     def name(self) -> str:
+        if self.from_receiver:
+            return RECEIVER_ERRORS.get(self.code, f"receiver error 0x{self.code:02x}")
         try:
             return ErrorCode(self.code).name
         except ValueError:
@@ -127,7 +140,7 @@ def parse(data: bytes) -> Message | Error | None:
     if len(data) < 4 or data[0] not in REPORT_SIZES:
         return None
     if data[2] in (ERROR_20, ERROR_10) and len(data) >= 6:
-        return Error(data[1], data[3], data[4] >> 4, data[4] & 0x0F, data[5])
+        return Error(data[1], data[3], data[4] >> 4, data[4] & 0x0F, data[5], data[2] == ERROR_10)
     return Message(data[1], data[2], data[3] >> 4, data[3] & 0x0F, bytes(data[4:]))
 
 
