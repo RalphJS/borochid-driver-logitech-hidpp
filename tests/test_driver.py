@@ -301,3 +301,8 @@ def test_deleted_profiles_are_dropped_and_settings_survive_a_restart(run):
     store, again, mouse = run(main())
     assert set(store.load()["profiles"]) == {"work"}
     assert again.state["bind.g5"] == SUPER_V and mouse.table[5] == 0 and again.state["status"] == "Work"
+
+
+def test_the_mouse_identifies_itself_by_unit_id(run):
+    driver, *_ = run(online())
+    assert driver.device_id == "01AB0945"

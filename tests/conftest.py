@@ -105,6 +105,8 @@ class FakeMouse(Channel):
                 fid = (p[0] << 8) | p[1]
                 return bytes([INDEX.get(fid, 0), 0, 0]) if fid else bytes([0, 0, 0])
             return bytes([4, 2, p[2]])
+        if feature == 0x0003 and fn == 0:  # getDeviceInfo: entities, unit ID, transport, model
+            return bytes([2, 0x01, 0xAB, 0x09, 0x45, 0x00, 0x0B])
         if feature == 0x2201:
             if fn == 1:
                 return bytes([0, 0x00, 0x64, 0xE0, 0x32, 0x64, 0x00])
