@@ -22,7 +22,9 @@ applies the active Borochid profile:
   a key shortcut or a wheel step (replayed through the service's virtual
   input device while the button is held), DPI up/down/cycle/shift, or
   nothing. The left click can't be remapped.
-* **Battery** comes from the kernel (`host.power`), not from this driver.
+* **Battery** comes from the kernel (`host.power`), not from this driver,
+  except on the cable, where the kernel has none: there the driver reads
+  `UNIFIED_BATTERY` and publishes `battery` and `charging`.
 
 **The driver never writes the mouse's profile memory (flash).** When the
 service stops, the mouse goes back to onboard mode and its own profile.
@@ -75,12 +77,20 @@ These shaped the design; the tests' `FakeMouse` models each of them.
   and the kernel's own HID++ driver talks on the same node with software
   ID 1. Replies are matched on feature index, function and software ID
   (this driver uses 0x0B); notifications have software ID 0.
+* **On its cable** the mouse is `046d:c098`, bound to `hid-generic`
+  (no kernel battery), with HID++ on USB interface 2 and the same
+  features and unit ID as through the receiver. Plugging the cable in drops
+  the receiver link: the kernel's receiver battery goes offline, and the
+  receiver answers requests for the mouse with a HID++ 1.0 `UNKNOWN_DEVICE`
+  error, which the driver treats like no reply. Unplugging it, the mouse
+  is back on the receiver (in onboard mode) within a second.
 
 ## Device access
 
 `udev/70-borochid-logitech-hidpp.rules` grants the session user the mouse's
 own HID node, matched on the paired device's HID ID
-(`KERNELS=="0003:046D:409F.*"`). Never the receiver: its node carries every
+(`KERNELS=="0003:046D:409F.*"`), and on the cable only its HID++
+interface (`c098`, interface 2). Never the receiver: its node carries every
 paired device's traffic, keyboards included. Never vendor-wide.
 
 Shortcuts need `/dev/uinput` for the service. The platform's `input` extra

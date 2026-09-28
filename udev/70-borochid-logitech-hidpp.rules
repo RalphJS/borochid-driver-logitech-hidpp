@@ -10,3 +10,7 @@
 
 # G502 X LIGHTSPEED through its receiver
 SUBSYSTEM=="hidraw", KERNELS=="0003:046D:409F.*", TAG+="uaccess"
+
+# G502 X LIGHTSPEED on its USB cable: only interface 2 (vendor page, HID++).
+# Interfaces 0 and 1 carry the pointer and the keys the mouse can send.
+SUBSYSTEM=="hidraw", ENV{ID_VENDOR_ID}=="046d", ENV{ID_MODEL_ID}=="c098", ENV{ID_USB_INTERFACE_NUM}=="02", TAG+="uaccess"

@@ -60,11 +60,19 @@ class FakeMouse(Channel):
       normal click only when its remap-table entry isn't 0;
     * a power cycle puts it back in onboard mode and sends a
       WIRELESS_DEVICE_STATUS notification.
+
+    ``wired``: the same mouse on its USB cable, not behind a receiver.
     """
 
-    def __init__(self):
-        super().__init__(DeviceIdentity(Bus.USB, "usb:1-2.3/1", vid=0x046D, pid=0x409F, serial="01-ab-09-45"), {"type": "hid"})
+    def __init__(self, wired: bool = False):
+        if wired:
+            ident = DeviceIdentity(Bus.USB, "usb:1-3", vid=0x046D, pid=0xC098, attrs={"sys_path": "/sys/usb1/1-3"})
+        else:
+            ident = DeviceIdentity(Bus.USB, "usb:1-2.3/1", vid=0x046D, pid=0x409F, serial="01-ab-09-45",
+                                   attrs={"sys_path": "/sys/usb1/1-2.3/hid", "receiver": "/sys/usb1/1-2.3"})
+        super().__init__(ident, {"type": "hid"})
         self.asleep = False
+        self.on_cable = False  # through the receiver: the receiver answers UNKNOWN_DEVICE
         self.mode = 1
         self.spy = False
         self.table = list(range(1, 12))
@@ -72,6 +80,7 @@ class FakeMouse(Channel):
         self.dpi_index = 1
         self.dpi = 3200
         self.rate_ms = 1
+        self.battery = (61, 1)  # charge %, charging status (1 charging)
         self.calls: list[tuple[int, int, bytes]] = []  # (feature id, function, params)
         self.clicks: list[int] = []  # button masks the kernel would see
 
@@ -86,6 +95,10 @@ class FakeMouse(Channel):
         assert len(data) == 20 and data[0] == 0x11
         index, fn, sw, params = data[2], data[3] >> 4, data[3] & 0x0F, data[4:]
         if self.asleep:
+            return
+        if self.on_cable:
+            out = bytes([0x10, 0x01, 0x8F, index, data[3], 0x08, 0])
+            asyncio.get_running_loop().call_soon(self._deliver, out)
             return
         feature = FEAT.get(index, 0) if index else 0
         self.calls.append((feature, fn, params.rstrip(b"\0")))
@@ -107,6 +120,8 @@ class FakeMouse(Channel):
             return bytes([4, 2, p[2]])
         if feature == 0x0003 and fn == 0:  # getDeviceInfo: entities, unit ID, transport, model
             return bytes([2, 0x01, 0xAB, 0x09, 0x45, 0x00, 0x0B])
+        if feature == 0x1004 and fn == 1:  # get_status: %, level flags, charging, external power
+            return bytes([self.battery[0], 0x04, self.battery[1], 1])
         if feature == 0x2201:
             if fn == 1:
                 return bytes([0, 0x00, 0x64, 0xE0, 0x32, 0x64, 0x00])
@@ -174,6 +189,10 @@ class FakeMouse(Channel):
                 clicks |= (1 << (slot - 1)) if slot else 0
         self.clicks.append(clicks)
 
+    def battery_event(self, percent: int, status: int) -> None:
+        self.battery = (percent, status)
+        self._deliver(bytes([0x11, 0xFF, INDEX[0x1004], 0x00, percent, 0x04, status, 1]).ljust(20, b"\0"))
+
     def power_cycle(self) -> None:
         self.mode, self.spy, self.table, self.dpi = 1, False, list(range(1, 12)), 1600
         self._deliver(bytes([0x11, 0x01, INDEX[0x1D4B], 0x00, 0x01, 0x01, 0x00]).ljust(20, b"\0"))
@@ -209,8 +228,8 @@ class FakeHost:
         self.input = FakeInput()
 
 
-def make_driver(settings=None, **hidpp):
-    mouse = FakeMouse()
+def make_driver(settings=None, wired=False, **hidpp):
+    mouse = FakeMouse(wired)
     events: list[dict] = []
     m = copy.deepcopy(MANIFEST)
     m["hidpp"].update(hidpp)

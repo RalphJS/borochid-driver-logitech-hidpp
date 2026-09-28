@@ -28,6 +28,12 @@ and, as a fallback, checks the mode whenever the mouse becomes active after
 ``wake_check_s`` of silence. The flip side is safe: if the service dies, a
 power cycle hands the mouse back to its onboard profile. ``stop()`` does
 that at once, restoring the onboard DPI level too.
+
+**On its cable** the mouse is a USB device of its own (the service shows it
+as one device with the receiver connection, by its unit ID). The kernel
+reads the battery through the receiver only, so on the cable this driver
+reads it (UNIFIED_BATTERY) and publishes ``battery`` and ``charging``; the
+package points that connection's battery at them.
 """
 
 from __future__ import annotations
@@ -80,6 +86,8 @@ class HidppDriver(Driver):
         self._wake = asyncio.Event()
         self._tasks: set[asyncio.Task] = set()
         self._ready = False  # set up in this connection
+        # On the cable rather than behind a receiver: the kernel has no battery for it.
+        self.wired = not self.channel.ident.attrs.get("receiver")
 
         self.state = {"link": "connecting", "status": "Connecting", "dpi": None, "input_error": None}
         self.state.update(self._profile_state())
@@ -176,6 +184,8 @@ class HidppDriver(Driver):
         if self.mode != HOST_MODE:
             self._onboard_level = (await s.feature(Feature.ONBOARD_PROFILES, 0x0B))[0]
         await self._enter_host()
+        if self.wired:
+            await self._read_battery()
         self._ready = True
         self._last_activity = time.monotonic()
         self.publish({"link": "online"})
@@ -191,6 +201,17 @@ class HidppDriver(Driver):
             return None
         unit = bytes(info[1:5])
         return unit.hex().upper() if any(unit) else None
+
+    async def _read_battery(self) -> None:
+        try:
+            self._battery(await self.session.feature(Feature.UNIFIED_BATTERY, 1))
+        except (HidppError, Unsupported) as e:
+            log.info("%s: no battery reading: %s", self.channel.ident.uid, e)
+
+    def _battery(self, params: bytes) -> None:
+        """UNIFIED_BATTERY status (fn1 reply or event 0): charge %, level
+        flags, charging status (1 charging, 2 slowly, 3 full), external power."""
+        self.publish({"battery": params[0], "charging": params[2] in (1, 2, 3)})
 
     async def settings_reloaded(self) -> None:
         """The mouse's own settings were found (or its other connection
@@ -313,6 +334,9 @@ class HidppDriver(Driver):
         index = self.session.index
         if msg.feature_index == index.get(Feature.MOUSE_BUTTON_SPY) and msg.function == 0:
             self._buttons(u16(msg.params, 0))
+        elif msg.feature_index == index.get(Feature.UNIFIED_BATTERY) and msg.function == 0:
+            if self.wired:
+                self._battery(msg.params)
         elif msg.feature_index == index.get(Feature.WIRELESS_DEVICE_STATUS):
             # Power-on or reconnect: the mouse has forgotten host mode.
             log.info("%s: mouse reconnected", self.channel.ident.uid)

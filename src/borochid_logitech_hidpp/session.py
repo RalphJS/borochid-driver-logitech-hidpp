@@ -27,7 +27,9 @@ class HidppError(Exception):
 
 
 class NoReply(Exception):
-    """The device did not answer: asleep, switched off or out of range."""
+    """The device did not answer: asleep, switched off or out of range. Also
+    raised when its receiver answers instead (UNKNOWN_DEVICE: the device is
+    on its cable or switched off)."""
 
 
 class Unsupported(Exception):
@@ -69,6 +71,8 @@ class Session:
             finally:
                 self._pending = None
         if isinstance(msg, Error):
+            if msg.from_receiver:
+                raise NoReply(f"the receiver answered for the device: {msg.name}")
             feature = next((f for f, i in self.index.items() if i == feature_index), feature_index)
             raise HidppError(feature, function, msg.code, msg.name)
         return msg.params
