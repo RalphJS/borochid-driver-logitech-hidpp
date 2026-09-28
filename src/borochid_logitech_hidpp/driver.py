@@ -68,6 +68,7 @@ class HidppDriver(Driver):
         self.profiles = profiles.Profiles(self.model.defaults, profiles.Limits(), {b.id for b in self.remappable})
         self.profiles.load(self.settings)
         self.profile_name = "Default"
+        self._shared: tuple[str, str | None, set[str]] | None = None  # the last use_profile()
         self.button_count = max(b.number for b in self.model.buttons)
         self.mode: int | None = None
         self._onboard_level: int | None = None  # restored when handing the mouse back
@@ -162,6 +163,9 @@ class HidppDriver(Driver):
     async def _setup(self) -> None:
         self.session.forget()
         s = self.session
+        # First, so the mouse's own settings are the ones applied below.
+        if unit := await self._read_unit_id():
+            await self.identify(unit)
         lo, hi, step = await self._dpi_capabilities()
         mask = (await s.feature(Feature.REPORT_RATE, 0))[0]
         rates = tuple(sorted({1000 // (n + 1) for n in range(8) if mask >> n & 1}, reverse=True))
@@ -177,6 +181,31 @@ class HidppDriver(Driver):
         self.publish({"link": "online"})
         self.publish({"status": self._status()})
         log.info("%s: online, profile %r", self.channel.ident.uid, self.profile_name)
+
+    async def _read_unit_id(self) -> str | None:
+        """The mouse's unit ID (DEVICE_FW_VERSION getDeviceInfo): the same
+        through the receiver and on the cable, unlike the USB serial or port."""
+        try:
+            info = await self.session.feature(Feature.DEVICE_FW_VERSION, 0)
+        except (HidppError, Unsupported):
+            return None
+        unit = bytes(info[1:5])
+        return unit.hex().upper() if any(unit) else None
+
+    async def settings_reloaded(self) -> None:
+        """The mouse's own settings were found (or its other connection
+        changed them): rebuild the profiles and, if it listens, apply them."""
+        limits = self.profiles.limits
+        self.profiles = profiles.Profiles(self.model.defaults, limits, {b.id for b in self.remappable})
+        self.profiles.load(self.settings)
+        if self._shared is not None:
+            self.profiles.use(*self._shared)
+        self._stage = self.profiles.current.default_stage
+        self._release_all()
+        try:
+            await self._changed("profile")
+        except NoReply:
+            self._went_quiet()
 
     async def _dpi_capabilities(self) -> tuple[int, int, int]:
         """ADJUSTABLE_DPI fn1: DPI words, ``0xE000|step`` between two values
@@ -369,6 +398,7 @@ class HidppDriver(Driver):
     # profiles (the service's, shared by every device)
 
     async def use_profile(self, profile: SharedProfile, known: set[str]) -> None:
+        self._shared = (profile.id, profile.copy_of, set(known))
         self.profiles.use(profile.id, profile.copy_of, known)
         self.profile_name = profile.name
         self._stage = self.profiles.current.default_stage
